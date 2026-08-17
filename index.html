@@ -321,6 +321,8 @@ tbody tr.total-row .amount-cell{font-size:14px;}
 details.raw-debug{margin-top:10px;font-size:12px;color:var(--text-muted);}
 details.raw-debug pre{max-height:180px;overflow:auto;background:var(--chip-bg);padding:8px;border-radius:8px;white-space:pre-wrap;}
 
+.fixed-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-bottom:12px;}
+.fixed-dirty-note{display:flex;align-items:center;gap:5px;color:var(--warn,#b45309);}
 .fixed-table td, .fixed-table th{white-space:nowrap;}
 .months-check{display:flex;flex-wrap:wrap;gap:6px;max-width:280px;}
 .months-check label{flex-direction:row;align-items:center;gap:4px;font-size:11.5px;}
@@ -566,6 +568,8 @@ function monthSelectOptions(selectedKey, fallbackYear){
 /* ---------------- Filtros UI y selección (por pestaña) ---------------- */
 let uiFilters = { tipo:'Todos', categorias:new Set(), search:'' };
 let selectedTx = new Set();
+let fixedFormDirty = false;
+let fixedDraft = [];
 
 /* ---------------- Helpers de formato ---------------- */
 const money = new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',maximumFractionDigits:2});
@@ -615,6 +619,18 @@ document.addEventListener('click', (e)=>{
     panel.classList.add('hidden');
   });
 });
+
+async function guardLeaveFixedTab(proceed){
+  if(state.activeTab==='__fixed__' && fixedFormDirty){
+    const leave = await showConfirmDialog(
+      'Tienes cambios sin guardar en Gastos fijos. Si sales ahora, se perderán.',
+      {title:'Cambios sin guardar', confirmText:'Salir sin guardar', cancelText:'Seguir editando', danger:true}
+    );
+    if(!leave) return;
+    fixedFormDirty = false;
+  }
+  proceed();
+}
 
 let dragSrcKey = null;
 
@@ -692,7 +708,9 @@ function renderTabsRow(){
     <button class="tab settings-tab ${isSettings?'active':''}" data-tab="__fixed__">${mi('settings',{size:17})} Gastos fijos</button>
   `;
   row.querySelectorAll('.tab-label').forEach(btn=>{
-    btn.onclick = ()=>{ state.activeTab = btn.dataset.tab; uiFilters={tipo:'Todos',categorias:new Set(),search:''}; saveState(); render(); };
+    btn.onclick = ()=>guardLeaveFixedTab(()=>{
+      state.activeTab = btn.dataset.tab; uiFilters={tipo:'Todos',categorias:new Set(),search:''}; saveState(); render();
+    });
   });
   row.querySelector('.settings-tab').onclick = ()=>{ state.activeTab = '__fixed__'; saveState(); render(); };
   row.querySelectorAll('[data-menu-toggle]').forEach(btn=>{
@@ -712,7 +730,7 @@ function renderTabsRow(){
   row.querySelectorAll('[data-delete-tab]').forEach(btn=>{
     btn.onclick = (e)=>{ e.stopPropagation(); deleteTab(btn.dataset.deleteTab); };
   });
-  document.getElementById('tab-add').onclick = createNewMonth;
+  document.getElementById('tab-add').onclick = ()=>guardLeaveFixedTab(createNewMonth);
 
   row.querySelectorAll('.tab[data-key]').forEach(tabEl=>{
     tabEl.addEventListener('dragstart', (e)=>{
@@ -1338,10 +1356,15 @@ function renderFixedExpensesTab(){
       <p style="margin:0;color:var(--text-secondary);">
         Define aquí tus gastos fijos recurrentes (renta, seguros, suscripciones…). Actívalos para que aparezcan como
         sugerencia con el botón <b>“Agregar gastos fijos”</b> dentro de cada mes. Si un gasto ya no aplica, desactívalo
-        (no se borra su historial).
+        (no se borra su historial). Los cambios de descripción, categoría, tipo y monto se aplican también a los
+        gastos fijos que ya agregaste en meses anteriores al guardar.
       </p>
     </div>
     <div class="card">
+      <div class="fixed-toolbar">
+        <span class="hint fixed-dirty-note hidden" id="fixed-dirty-note" style="margin:0;">${mi('info',{size:14})} Tienes cambios sin guardar</span>
+        <button class="btn btn-primary" id="btn-save-fixed" disabled>${mi('save',{size:16})} Guardar cambios</button>
+      </div>
       <div style="overflow-x:auto;">
         <table class="fixed-table" style="min-width:760px;">
           <thead><tr>
@@ -1355,16 +1378,52 @@ function renderFixedExpensesTab(){
       </div>
     </div>
   `;
+  fixedDraft = JSON.parse(JSON.stringify(state.fixedTemplates));
+  fixedFormDirty = false;
   renderFixedRows();
+  updateFixedSaveUI();
   document.getElementById('btn-add-fixed-template').onclick = ()=>{
-    state.fixedTemplates.push({id:uid('f'), description:'Nuevo gasto fijo', category:'Otros', tipo:'Fijo', amount:0, appliesTo:'all', active:true});
-    saveState(); renderFixedRows();
+    fixedDraft.push({id:uid('f'), description:'Nuevo gasto fijo', category:'Otros', tipo:'Fijo', amount:0, appliesTo:'all', active:true});
+    markFixedDirty();
+    renderFixedRows();
   };
+  document.getElementById('btn-save-fixed').onclick = saveFixedChanges;
+}
+
+function updateFixedSaveUI(){
+  const btn = document.getElementById('btn-save-fixed');
+  const note = document.getElementById('fixed-dirty-note');
+  if(!btn || !note) return;
+  btn.disabled = !fixedFormDirty;
+  note.classList.toggle('hidden', !fixedFormDirty);
+}
+
+function markFixedDirty(){
+  fixedFormDirty = true;
+  updateFixedSaveUI();
+}
+
+function saveFixedChanges(){
+  state.fixedTemplates = JSON.parse(JSON.stringify(fixedDraft));
+  state.fixedTemplates.forEach(f=>{
+    state.transactions.forEach(t=>{
+      if(t.templateId===f.id){
+        t.description = f.description;
+        t.category = f.category;
+        t.tipo = f.tipo;
+        t.amount = f.amount;
+      }
+    });
+  });
+  saveState();
+  fixedFormDirty = false;
+  updateFixedSaveUI();
+  render();
 }
 
 function renderFixedRows(){
   const tbody = document.getElementById('fixed-tbody');
-  tbody.innerHTML = state.fixedTemplates.map(f=>{
+  tbody.innerHTML = fixedDraft.map(f=>{
     const monthsChecks = state.tabs.map(t=>{
       const checked = f.appliesTo==='all' || (Array.isArray(f.appliesTo) && f.appliesTo.includes(t.key));
       return `<label><input type="checkbox" data-month="${t.key}" data-fid="${f.id}" ${checked?'checked':''} ${f.appliesTo==='all'?'disabled':''}> ${t.label}</label>`;
@@ -1393,7 +1452,7 @@ function renderFixedRows(){
 
   tbody.querySelectorAll('tr').forEach(tr=>{
     const fid = tr.dataset.fid;
-    const f = state.fixedTemplates.find(x=>x.id===fid);
+    const f = fixedDraft.find(x=>x.id===fid);
     tr.querySelectorAll('[data-field]').forEach(el=>{
       el.addEventListener('change', ()=>{
         const field = el.dataset.field;
@@ -1401,7 +1460,7 @@ function renderFixedRows(){
         else if(field==='active'){ f.active = el.checked; }
         else if(field==='appliesToAll'){ f.appliesTo = el.checked ? 'all' : state.tabs.map(t=>t.key); renderFixedRows(); }
         else { f[field] = el.value; }
-        saveState();
+        markFixedDirty();
       });
     });
     tr.querySelectorAll('[data-month]').forEach(cb=>{
@@ -1410,15 +1469,16 @@ function renderFixedRows(){
         const mk = cb.dataset.month;
         if(cb.checked){ if(!f.appliesTo.includes(mk)) f.appliesTo.push(mk); }
         else { f.appliesTo = f.appliesTo.filter(x=>x!==mk); }
-        saveState();
+        markFixedDirty();
       });
     });
   });
   tbody.querySelectorAll('[data-del-fixed]').forEach(b=>{
     b.onclick = async ()=>{
       if(await showConfirmDialog('¿Eliminar esta plantilla de gasto fijo?', {title:'Eliminar plantilla', danger:true})){
-        state.fixedTemplates = state.fixedTemplates.filter(f=>f.id!==b.dataset.delFixed);
-        saveState(); renderFixedRows();
+        fixedDraft = fixedDraft.filter(f=>f.id!==b.dataset.delFixed);
+        markFixedDirty();
+        renderFixedRows();
       }
     };
   });
