@@ -138,9 +138,20 @@ button{font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;}
 .btn-sm{padding:5px 10px;border-radius:7px;}
 .btn-danger{color:var(--bad);}
 .btn-danger:hover{background:#fef2f2;border-color:var(--bad);}
+.btn-solid-danger{background:var(--bad);border-color:var(--bad);color:#fff;}
+.btn-solid-danger:hover{filter:brightness(1.08);}
 @media (prefers-color-scheme: dark){
   .btn-danger:hover{background:#3f1d1d;}
 }
+
+.dialog-modal{max-width:380px;text-align:center;padding:30px 26px 24px;}
+.dialog-icon{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;background:rgba(29,211,176,.12);color:var(--brand);}
+.dialog-icon.danger{background:rgba(220,38,38,.12);color:var(--bad);}
+.dialog-modal h3{margin:0 0 8px;font-size:16px;}
+.dialog-modal p{margin:0 0 20px;font-size:13px;color:var(--text-secondary);line-height:1.5;white-space:pre-line;}
+.dialog-input{width:100%;margin:-8px 0 20px;padding:9px 12px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);font:inherit;text-align:left;}
+.dialog-actions{display:flex;justify-content:center;gap:10px;}
+.dialog-actions .btn{flex:1;}
 
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--gridline);margin-bottom:20px;flex-wrap:wrap;align-items:center;}
 .tab{
@@ -368,6 +379,59 @@ function mi(name, opts){
   return `<span class="material-symbols-outlined" style="font-size:${size}px;${color}" translate="no">${name}</span>`;
 }
 
+/* ---------------- Diálogos propios (reemplazan alert/confirm/prompt del navegador) ---------------- */
+function showDialog(opts){
+  const {title, message, icon='info', danger=false, showCancel=false, showInput=false, inputValue='', confirmText='Aceptar', cancelText='Cancelar'} = opts;
+  return new Promise(resolve=>{
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="modal dialog-modal">
+        <div class="dialog-icon ${danger?'danger':''}">${mi(icon,{size:26})}</div>
+        ${title ? `<h3>${escapeHtml(title)}</h3>` : ''}
+        <p>${escapeHtml(message)}</p>
+        ${showInput ? `<input type="text" id="dialog-input" class="dialog-input" value="${escapeHtml(inputValue)}">` : ''}
+        <div class="dialog-actions">
+          ${showCancel ? `<button class="btn" id="dialog-cancel">${escapeHtml(cancelText)}</button>` : ''}
+          <button class="btn ${danger?'btn-solid-danger':'btn-primary'}" id="dialog-confirm">${escapeHtml(confirmText)}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+    const cancelVal = showInput ? null : false;
+    const finish = (value)=>{
+      document.removeEventListener('keydown', onKey);
+      backdrop.remove();
+      resolve(value);
+    };
+    const onKey = (e)=>{ if(e.key==='Escape') finish(cancelVal); };
+    document.addEventListener('keydown', onKey);
+    backdrop.addEventListener('click', e=>{ if(e.target===backdrop) finish(cancelVal); });
+    const cancelBtn = backdrop.querySelector('#dialog-cancel');
+    if(cancelBtn) cancelBtn.onclick = ()=> finish(cancelVal);
+    const input = backdrop.querySelector('#dialog-input');
+    backdrop.querySelector('#dialog-confirm').onclick = ()=> finish(showInput ? input.value : true);
+    if(input){
+      input.focus(); input.select();
+      input.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); finish(input.value); } });
+    } else {
+      backdrop.querySelector('#dialog-confirm').focus();
+    }
+  });
+}
+function showAlertDialog(message, opts){
+  opts = opts || {};
+  return showDialog({message, icon:opts.icon||'info', title:opts.title, confirmText:opts.confirmText||'Entendido'});
+}
+function showConfirmDialog(message, opts){
+  opts = opts || {};
+  return showDialog({message, icon:opts.icon||(opts.danger?'warning':'help'), title:opts.title, danger:!!opts.danger, showCancel:true, confirmText:opts.confirmText||(opts.danger?'Eliminar':'Confirmar'), cancelText:opts.cancelText||'Cancelar'});
+}
+function showPromptDialog(message, defaultValue, opts){
+  opts = opts || {};
+  return showDialog({message, icon:opts.icon||'edit', title:opts.title, showCancel:true, showInput:true, inputValue:defaultValue||'', confirmText:opts.confirmText||'Guardar', cancelText:opts.cancelText||'Cancelar'});
+}
+
 const TIPOS = ['Fijo','Variable'];
 
 // reglas de auto-categorización aprendidas del histórico (palabra clave -> categoría/tipo)
@@ -580,7 +644,7 @@ function createNewMonth(){
     const monthNum = parseInt(document.getElementById('new-month-select').value, 10);
     const year = parseInt(document.getElementById('new-month-year').value, 10) || now.getFullYear();
     const key = monthKeyOf(year, monthNum);
-    if(state.tabs.some(t=>t.key===key)){ alert('Ese mes ya existe.'); return; }
+    if(state.tabs.some(t=>t.key===key)){ showAlertDialog('Ese mes ya existe.'); return; }
     insertMonthTabSorted(key);
     state.activeTab = key;
     saveState();
@@ -680,23 +744,23 @@ function renderTabsRow(){
   });
 }
 
-function renameTab(key){
+async function renameTab(key){
   const t = state.tabs.find(x=>x.key===key);
   if(!t) return;
-  const name = prompt('Nuevo nombre del mes:', t.label);
+  const name = await showPromptDialog('Nuevo nombre del mes:', t.label, {title:'Renombrar mes'});
   if(!name || !name.trim()) return;
   t.label = name.trim();
   saveState(); render();
 }
 
-function deleteTab(key){
+async function deleteTab(key){
   const t = state.tabs.find(x=>x.key===key);
   if(!t) return;
   const count = state.transactions.filter(x=>x.month===key).length;
   const warning = count>0
     ? `¿Eliminar el mes "${t.label}" y sus ${count} movimiento(s)? Esta acción no se puede deshacer.`
     : `¿Eliminar el mes "${t.label}"?`;
-  if(!confirm(warning)) return;
+  if(!await showConfirmDialog(warning, {title:'Eliminar mes', danger:true})) return;
   state.tabs = state.tabs.filter(x=>x.key!==key);
   state.transactions = state.transactions.filter(x=>x.month!==key);
   state.incomes = state.incomes.filter(x=>x.month!==key);
@@ -709,10 +773,10 @@ function deleteTab(key){
   saveState(); render();
 }
 
-function restoreMonthOriginal(key){
+async function restoreMonthOriginal(key){
   const original = getSeedTransactionsForMonth(key);
   if(original.length===0) return;
-  if(!confirm('Esto reemplazará todos los movimientos actuales de este mes con los datos originales, descartando cualquier cambio manual que hayas hecho. Esta acción no se puede deshacer. ¿Continuar?')) return;
+  if(!await showConfirmDialog('Esto reemplazará todos los movimientos actuales de este mes con los datos originales, descartando cualquier cambio manual que hayas hecho. Esta acción no se puede deshacer. ¿Continuar?', {title:'Restaurar mes original', danger:true})) return;
   state.transactions = state.transactions.filter(t=>t.month!==key).concat(JSON.parse(JSON.stringify(original)));
   saveState(); render();
 }
@@ -857,10 +921,10 @@ function renderMonthTab(tabObj){
   document.getElementById('btn-upload-pdf-toolbar').onclick = ()=>{ document.getElementById('gastos-add-panel').classList.add('hidden'); openImportModal(tabObj.key); };
   document.getElementById('btn-add-manual').onclick = ()=>{ document.getElementById('gastos-add-panel').classList.add('hidden'); openTxModal(null, tabObj.key); };
   document.getElementById('btn-add-fixed-month').onclick = ()=>{ document.getElementById('gastos-add-panel').classList.add('hidden'); applyFixedTemplatesToMonth(tabObj.key); };
-  document.getElementById('bulk-delete').onclick = ()=>{
+  document.getElementById('bulk-delete').onclick = async ()=>{
     const n = selectedTx.size;
     if(n===0) return;
-    if(!confirm(`¿Eliminar ${n} movimiento(s) seleccionado(s)? Esta acción no se puede deshacer.`)) return;
+    if(!await showConfirmDialog(`¿Eliminar ${n} movimiento(s) seleccionado(s)? Esta acción no se puede deshacer.`, {title:'Eliminar movimientos', danger:true})) return;
     state.transactions = state.transactions.filter(t=>!selectedTx.has(t.id));
     selectedTx.clear();
     saveState();
@@ -909,8 +973,8 @@ function renderIncomeList(monthKey){
     </div>
   `;
   wrap.querySelectorAll('[data-edit-income]').forEach(b=>b.onclick=()=>openIncomeModal(b.dataset.editIncome, monthKey));
-  wrap.querySelectorAll('[data-del-income]').forEach(b=>b.onclick=()=>{
-    if(confirm('¿Eliminar este ingreso? Esta acción no se puede deshacer.')){
+  wrap.querySelectorAll('[data-del-income]').forEach(b=>b.onclick=async ()=>{
+    if(await showConfirmDialog('¿Eliminar este ingreso? Esta acción no se puede deshacer.', {title:'Eliminar ingreso', danger:true})){
       state.incomes = state.incomes.filter(i=>i.id!==b.dataset.delIncome);
       saveState(); renderMonthTab(state.tabs.find(t=>t.key===monthKey));
     }
@@ -946,7 +1010,7 @@ function openIncomeModal(incomeId, monthKey){
   document.getElementById('inc-save').onclick = ()=>{
     const desc = document.getElementById('inc-desc').value.trim();
     const amount = parseFloat(document.getElementById('inc-amount').value);
-    if(!desc || isNaN(amount)){ alert('Falta descripción o monto válido.'); return; }
+    if(!desc || isNaN(amount)){ showAlertDialog('Falta descripción o monto válido.', {icon:'warning'}); return; }
     const date = document.getElementById('inc-date').value || null;
     const month = document.getElementById('inc-month').value;
     if(editing){
@@ -1143,8 +1207,8 @@ function renderTxRows(monthKey){
   }).join('') + totalRowHtml;
 
   tbody.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openTxModal(b.dataset.edit, monthKey));
-  tbody.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
-    if(confirm('¿Eliminar este movimiento? Esta acción no se puede deshacer.')){
+  tbody.querySelectorAll('[data-del]').forEach(b=>b.onclick=async ()=>{
+    if(await showConfirmDialog('¿Eliminar este movimiento? Esta acción no se puede deshacer.', {title:'Eliminar movimiento', danger:true})){
       state.transactions = state.transactions.filter(t=>t.id!==b.dataset.del);
       saveState(); renderMonthTab(state.tabs.find(t=>t.key===monthKey));
     }
@@ -1229,7 +1293,7 @@ function openTxModal(txId, monthKey){
   document.getElementById('m-save').onclick = ()=>{
     const desc = document.getElementById('m-desc').value.trim();
     const amount = parseFloat(document.getElementById('m-amount').value);
-    if(!desc || isNaN(amount)){ alert('Falta descripción o monto válido.'); return; }
+    if(!desc || isNaN(amount)){ showAlertDialog('Falta descripción o monto válido.', {icon:'warning'}); return; }
     const category = document.getElementById('m-cat').value;
     const tipo = document.getElementById('m-tipo').value;
     const date = document.getElementById('m-date').value || null;
@@ -1261,8 +1325,8 @@ function applyFixedTemplatesToMonth(monthKey){
   });
   saveState();
   renderMonthTab(state.tabs.find(t=>t.key===monthKey));
-  if(added===0) alert('Todos los gastos fijos activos ya estaban agregados a este mes.');
-  else alert(`Se agregaron ${added} gasto(s) fijo(s) a este mes. Puedes editar el monto si varió.`);
+  if(added===0) showAlertDialog('Todos los gastos fijos activos ya estaban agregados a este mes.');
+  else showAlertDialog(`Se agregaron ${added} gasto(s) fijo(s) a este mes. Puedes editar el monto si varió.`, {icon:'task_alt'});
 }
 
 /* ---------------- Tab de Gastos Fijos (plantillas recurrentes) ---------------- */
@@ -1351,8 +1415,8 @@ function renderFixedRows(){
     });
   });
   tbody.querySelectorAll('[data-del-fixed]').forEach(b=>{
-    b.onclick = ()=>{
-      if(confirm('¿Eliminar esta plantilla de gasto fijo?')){
+    b.onclick = async ()=>{
+      if(await showConfirmDialog('¿Eliminar esta plantilla de gasto fijo?', {title:'Eliminar plantilla', danger:true})){
         state.fixedTemplates = state.fixedTemplates.filter(f=>f.id!==b.dataset.delFixed);
         saveState(); renderFixedRows();
       }
@@ -1648,7 +1712,7 @@ function openImportModal(defaultMonth){
     render();
     if(entries.length>1){
       const summary = entries.map(([key,n])=>`${n} en ${monthLabelFromKey(key)}`).join(', ');
-      alert(`Se importaron ${parsedRows.length} movimiento(s), repartidos así: ${summary}.`);
+      showAlertDialog(`Se importaron ${parsedRows.length} movimiento(s), repartidos así: ${summary}.`, {icon:'task_alt', title:'Importación completa'});
     }
   };
 }
