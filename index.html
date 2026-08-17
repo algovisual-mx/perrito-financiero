@@ -1484,8 +1484,8 @@ function openImportModal(defaultMonth){
         <label><span>Año del estado de cuenta</span><input type="number" id="i-year" value="${thisYear}" style="width:90px;"></label>
       </div>
       <div id="mode-pdf-panel">
-        <input type="file" accept="application/pdf" id="i-file">
-        <p class="hint">Se procesa dentro de tu navegador, no se sube a ningún servidor.</p>
+        <input type="file" accept="application/pdf" id="i-file" multiple>
+        <p class="hint">Puedes seleccionar varios PDF a la vez (o arrastrarlos aquí) — se procesa todo dentro de tu navegador, no se sube a ningún servidor.</p>
       </div>
       <div id="mode-paste-panel" class="hidden">
         <textarea id="i-paste" rows="6" placeholder="Copia y pega aquí las líneas de movimientos de tu estado de cuenta…"></textarea>
@@ -1526,29 +1526,42 @@ function openImportModal(defaultMonth){
     const status = document.getElementById('i-status');
     const year = parseInt(document.getElementById('i-year').value) || thisYear;
     const mode = document.getElementById('import-mode-select').value;
-    let text = '';
-    try{
-      if(mode==='pdf'){
-        const file = document.getElementById('i-file').files[0];
-        if(!file){ status.textContent = 'Selecciona un archivo PDF primero.'; return; }
-        status.textContent = 'Procesando PDF…';
-        text = await extractPdfText(file);
-      } else {
-        text = document.getElementById('i-paste').value;
+    let combinedText = '';
+    let newRows = [];
+    const failedFiles = [];
+    if(mode==='pdf'){
+      const files = Array.from(document.getElementById('i-file').files);
+      if(!files.length){ status.textContent = 'Selecciona uno o más archivos PDF primero.'; return; }
+      for(let idx=0; idx<files.length; idx++){
+        const file = files[idx];
+        status.textContent = files.length>1
+          ? `Procesando PDF ${idx+1} de ${files.length}: ${file.name}…`
+          : `Procesando ${file.name}…`;
+        try{
+          const text = await extractPdfText(file);
+          combinedText += `\n--- ${file.name} ---\n${text}`;
+          const {rows} = parseStatementText(text, year);
+          newRows = newRows.concat(rows);
+        }catch(err){
+          failedFiles.push(file.name);
+          console.error(err);
+        }
       }
-    }catch(err){
-      status.textContent = 'No se pudo leer el PDF. Prueba con "Pegar texto".';
-      console.error(err);
-      return;
+    } else {
+      combinedText = document.getElementById('i-paste').value;
+      const {rows} = parseStatementText(combinedText, year);
+      newRows = rows;
     }
-    const {rows, unmatched} = parseStatementText(text, year);
-    parsedRows = parsedRows.concat(rows);
-    status.textContent = parsedRows.length
+    parsedRows = parsedRows.concat(newRows);
+    const parts = [];
+    parts.push(parsedRows.length
       ? `Tienes ${parsedRows.length} movimiento(s) listos para agregar. Revisa y corrige antes de continuar.`
-      : 'No se detectaron movimientos automáticamente. Revisa el texto extraído abajo y usa "Pegar texto" si hace falta ajustar el formato.';
+      : 'No se detectaron movimientos automáticamente. Revisa el texto extraído abajo y usa "Pegar texto" si hace falta ajustar el formato.');
+    if(failedFiles.length) parts.push(`No se pudo leer: ${failedFiles.join(', ')}. Prueba con "Pegar texto" para esos.`);
+    status.textContent = parts.join(' ');
     renderPreview();
     document.getElementById('i-debug').classList.remove('hidden');
-    document.getElementById('i-debug-pre').textContent = text || '(sin texto)';
+    document.getElementById('i-debug-pre').textContent = combinedText || '(sin texto)';
     document.getElementById('i-commit').classList.toggle('hidden', parsedRows.length===0);
     document.getElementById('i-process').classList.toggle('hidden', parsedRows.length>0);
     document.getElementById('i-process-again').classList.toggle('hidden', parsedRows.length===0);
