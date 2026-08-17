@@ -298,6 +298,10 @@ tbody tr.total-row .amount-cell{font-size:14px;}
 .form-row{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;}
 .form-row label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-secondary);flex:1;min-width:120px;}
 .form-row label span{font-weight:600;}
+.dropzone{border:2px dashed var(--border-strong);border-radius:16px;padding:28px 20px;text-align:center;margin-bottom:10px;transition:border-color .15s ease, background .15s ease;}
+.dropzone.drag-active{border-color:var(--brand);background:rgba(29,211,176,.08);}
+.dropzone-icon{color:var(--text-muted);margin-bottom:6px;}
+.dropzone-text{margin:0 0 2px;font-weight:600;color:var(--text-primary);}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
 .hint{font-size:12px;color:var(--text-muted);margin:4px 0 12px;}
 .preview-table-wrap{max-height:320px;overflow:auto;border:1px solid var(--gridline);border-radius:10px;margin-top:10px;}
@@ -1475,21 +1479,16 @@ function openImportModal(defaultMonth){
       <h2>Importar movimientos</h2>
       <p class="hint" style="margin-top:-4px;">Cada movimiento se asigna solo al mes que le toca según su fecha — si tu estado de cuenta cruza dos meses, se reparte automáticamente. Puedes corregir el mes de cada línea abajo.</p>
       <div class="form-row">
-        <label style="max-width:220px;"><span>Método de importación</span>
-          <select id="import-mode-select">
-            <option value="pdf">Subir PDF</option>
-            <option value="paste">Pegar texto</option>
-          </select>
-        </label>
         <label><span>Año del estado de cuenta</span><input type="number" id="i-year" value="${thisYear}" style="width:90px;"></label>
       </div>
-      <div id="mode-pdf-panel">
-        <input type="file" accept="application/pdf" id="i-file" multiple>
-        <p class="hint">Puedes seleccionar varios PDF a la vez (o arrastrarlos aquí) — se procesa todo dentro de tu navegador, no se sube a ningún servidor.</p>
-      </div>
-      <div id="mode-paste-panel" class="hidden">
-        <textarea id="i-paste" rows="6" placeholder="Copia y pega aquí las líneas de movimientos de tu estado de cuenta…"></textarea>
-        <p class="hint">Útil si la extracción automática del PDF no detecta bien las líneas.</p>
+      <div id="i-dropzone" class="dropzone">
+        <div class="dropzone-icon">${mi('upload_file',{size:36})}</div>
+        <p class="dropzone-text">Arrastra tus PDFs aquí</p>
+        <p class="hint" style="margin:2px 0 10px;">o</p>
+        <button type="button" class="btn btn-primary btn-sm" id="i-file-trigger">Seleccionar archivo</button>
+        <input type="file" accept="application/pdf" id="i-file" multiple class="hidden">
+        <p class="hint" id="i-file-list"></p>
+        <p class="hint" style="margin-top:6px;">Se procesa todo dentro de tu navegador, no se sube a ningún servidor.</p>
       </div>
       <div id="i-status" class="hint"></div>
       <div class="preview-table-wrap hidden" id="i-preview-wrap">
@@ -1516,48 +1515,70 @@ function openImportModal(defaultMonth){
 
   let parsedRows = [];
 
-  document.getElementById('import-mode-select').onchange = (e)=>{
-    const mode = e.target.value;
-    document.getElementById('mode-pdf-panel').classList.toggle('hidden', mode!=='pdf');
-    document.getElementById('mode-paste-panel').classList.toggle('hidden', mode!=='paste');
+  const dropzone = document.getElementById('i-dropzone');
+  const fileInput = document.getElementById('i-file');
+  const fileListEl = document.getElementById('i-file-list');
+
+  const updateFileList = ()=>{
+    const files = Array.from(fileInput.files);
+    fileListEl.textContent = files.length ? `Seleccionado: ${files.map(f=>f.name).join(', ')}` : '';
   };
+
+  document.getElementById('i-file-trigger').onclick = ()=> fileInput.click();
+  fileInput.onchange = updateFileList;
+
+  ['dragover','dragenter'].forEach(evt=>{
+    dropzone.addEventListener(evt, e=>{
+      e.preventDefault();
+      dropzone.classList.add('drag-active');
+    });
+  });
+  ['dragleave','dragend'].forEach(evt=>{
+    dropzone.addEventListener(evt, e=>{
+      e.preventDefault();
+      dropzone.classList.remove('drag-active');
+    });
+  });
+  dropzone.addEventListener('drop', e=>{
+    e.preventDefault();
+    dropzone.classList.remove('drag-active');
+    const dropped = Array.from(e.dataTransfer.files).filter(f=>f.type==='application/pdf' || /\.pdf$/i.test(f.name));
+    if(!dropped.length) return;
+    const dt = new DataTransfer();
+    dropped.forEach(f=>dt.items.add(f));
+    fileInput.files = dt.files;
+    updateFileList();
+  });
 
   const processInput = async ()=>{
     const status = document.getElementById('i-status');
     const year = parseInt(document.getElementById('i-year').value) || thisYear;
-    const mode = document.getElementById('import-mode-select').value;
     let combinedText = '';
     let newRows = [];
     const failedFiles = [];
-    if(mode==='pdf'){
-      const files = Array.from(document.getElementById('i-file').files);
-      if(!files.length){ status.textContent = 'Selecciona uno o más archivos PDF primero.'; return; }
-      for(let idx=0; idx<files.length; idx++){
-        const file = files[idx];
-        status.textContent = files.length>1
-          ? `Procesando PDF ${idx+1} de ${files.length}: ${file.name}…`
-          : `Procesando ${file.name}…`;
-        try{
-          const text = await extractPdfText(file);
-          combinedText += `\n--- ${file.name} ---\n${text}`;
-          const {rows} = parseStatementText(text, year);
-          newRows = newRows.concat(rows);
-        }catch(err){
-          failedFiles.push(file.name);
-          console.error(err);
-        }
+    const files = Array.from(fileInput.files);
+    if(!files.length){ status.textContent = 'Selecciona uno o más archivos PDF primero.'; return; }
+    for(let idx=0; idx<files.length; idx++){
+      const file = files[idx];
+      status.textContent = files.length>1
+        ? `Procesando PDF ${idx+1} de ${files.length}: ${file.name}…`
+        : `Procesando ${file.name}…`;
+      try{
+        const text = await extractPdfText(file);
+        combinedText += `\n--- ${file.name} ---\n${text}`;
+        const {rows} = parseStatementText(text, year);
+        newRows = newRows.concat(rows);
+      }catch(err){
+        failedFiles.push(file.name);
+        console.error(err);
       }
-    } else {
-      combinedText = document.getElementById('i-paste').value;
-      const {rows} = parseStatementText(combinedText, year);
-      newRows = rows;
     }
     parsedRows = parsedRows.concat(newRows);
     const parts = [];
     parts.push(parsedRows.length
       ? `Tienes ${parsedRows.length} movimiento(s) listos para agregar. Revisa y corrige antes de continuar.`
-      : 'No se detectaron movimientos automáticamente. Revisa el texto extraído abajo y usa "Pegar texto" si hace falta ajustar el formato.');
-    if(failedFiles.length) parts.push(`No se pudo leer: ${failedFiles.join(', ')}. Prueba con "Pegar texto" para esos.`);
+      : 'No se detectaron movimientos automáticamente. Revisa el texto extraído abajo.');
+    if(failedFiles.length) parts.push(`No se pudo leer: ${failedFiles.join(', ')}.`);
     status.textContent = parts.join(' ');
     renderPreview();
     document.getElementById('i-debug').classList.remove('hidden');
@@ -1565,8 +1586,8 @@ function openImportModal(defaultMonth){
     document.getElementById('i-commit').classList.toggle('hidden', parsedRows.length===0);
     document.getElementById('i-process').classList.toggle('hidden', parsedRows.length>0);
     document.getElementById('i-process-again').classList.toggle('hidden', parsedRows.length===0);
-    document.getElementById('i-file').value = '';
-    document.getElementById('i-paste').value = '';
+    fileInput.value = '';
+    updateFileList();
   };
   document.getElementById('i-process').onclick = processInput;
   document.getElementById('i-process-again').onclick = processInput;
