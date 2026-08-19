@@ -164,9 +164,6 @@ button{font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;}
 .tab.active{color:var(--text-primary);border-bottom-color:var(--brand);}
 .tab.dragging{opacity:.4;}
 .tab.drag-over{background:var(--chip-bg);box-shadow:inset 0 0 0 2px var(--brand);border-radius:8px 8px 0 0;}
-.tab.settings-tab{margin-left:auto;color:var(--text-muted);padding:9px 16px;}
-.tab.settings-tab.active{border-bottom-color:var(--text-muted);}
-.tab.settings-tab .material-symbols-outlined{font-size:16px;margin-right:3px;}
 .tab-label{padding:9px 4px 9px 15px;border:none;background:none;color:inherit;font:inherit;cursor:pointer;}
 .tab-menu-btn{padding:9px 10px 9px 3px;border:none;background:none;color:var(--text-muted);cursor:pointer;display:inline-flex;align-items:center;}
 .tab-menu-btn:hover{color:var(--text-primary);}
@@ -705,14 +702,12 @@ function renderTabsRow(){
     `;
   }).join('') + `
     <button class="btn-fab btn-fab-sm" id="tab-add" title="Agregar mes">${mi('add',{size:16})}</button>
-    <button class="tab settings-tab ${isSettings?'active':''}" data-tab="__fixed__">${mi('settings',{size:17})} Gastos fijos</button>
   `;
   row.querySelectorAll('.tab-label').forEach(btn=>{
     btn.onclick = ()=>guardLeaveFixedTab(()=>{
       state.activeTab = btn.dataset.tab; uiFilters={tipo:'Todos',categorias:new Set(),search:''}; saveState(); render();
     });
   });
-  row.querySelector('.settings-tab').onclick = ()=>{ state.activeTab = '__fixed__'; saveState(); render(); };
   row.querySelectorAll('[data-menu-toggle]').forEach(btn=>{
     btn.onclick = (e)=>{
       e.stopPropagation();
@@ -877,12 +872,15 @@ function renderMonthTab(tabObj){
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
         <h3 style="margin:0;font-size:24px;">Gastos — ${tabObj.label}</h3>
-        <div class="dropdown" id="gastos-add-dropdown">
-          <button class="btn-fab" id="btn-gastos-add-toggle" title="Agregar">${mi('add',{size:22})}</button>
-          <div class="dropdown-panel side hidden" id="gastos-add-panel">
-            <button class="dropdown-item-btn" id="btn-add-manual">${mi('add',{size:15})} Agregar gasto</button>
-            <button class="dropdown-item-btn" id="btn-add-fixed-month">${mi('add',{size:15})} Agregar gastos fijos</button>
-            <button class="dropdown-item-btn" id="btn-upload-pdf-toolbar">${mi('upload_file',{size:15})} Agregar nuevo PDF</button>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn-fab-label" id="btn-edit-fixed">${mi('settings',{size:16})} Editar gastos fijos</button>
+          <div class="dropdown" id="gastos-add-dropdown">
+            <button class="btn-fab" id="btn-gastos-add-toggle" title="Agregar">${mi('add',{size:22})}</button>
+            <div class="dropdown-panel side hidden" id="gastos-add-panel">
+              <button class="dropdown-item-btn" id="btn-add-manual">${mi('add',{size:15})} Agregar gasto</button>
+              <button class="dropdown-item-btn" id="btn-add-fixed-month">${mi('add',{size:15})} Agregar gastos fijos</button>
+              <button class="dropdown-item-btn" id="btn-upload-pdf-toolbar">${mi('upload_file',{size:15})} Agregar nuevo PDF</button>
+            </div>
           </div>
         </div>
       </div>
@@ -936,6 +934,7 @@ function renderMonthTab(tabObj){
   };
   document.getElementById('search-box').oninput = (e)=>{ uiFilters.search = e.target.value; renderTxRows(tabObj.key); };
   document.getElementById('btn-gastos-add-toggle').onclick = (e)=>{ e.stopPropagation(); document.getElementById('gastos-add-panel').classList.toggle('hidden'); };
+  document.getElementById('btn-edit-fixed').onclick = ()=>{ state.activeTab = '__fixed__'; saveState(); render(); };
   document.getElementById('btn-upload-pdf-toolbar').onclick = ()=>{ document.getElementById('gastos-add-panel').classList.add('hidden'); openImportModal(tabObj.key); };
   document.getElementById('btn-add-manual').onclick = ()=>{ document.getElementById('gastos-add-panel').classList.add('hidden'); openTxModal(null, tabObj.key); };
   document.getElementById('btn-add-fixed-month').onclick = ()=>{ document.getElementById('gastos-add-panel').classList.add('hidden'); applyFixedTemplatesToMonth(tabObj.key); };
