@@ -567,6 +567,7 @@ let uiFilters = { tipo:'Todos', categorias:new Set(), search:'' };
 let selectedTx = new Set();
 let fixedFormDirty = false;
 let fixedDraft = [];
+let fixedReturnTab = null;
 
 /* ---------------- Helpers de formato ---------------- */
 const money = new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',maximumFractionDigits:2});
@@ -598,13 +599,16 @@ function render(){
     <div class="footer-note">Los montos se procesan localmente en tu navegador. Nada se envía a ningún servidor.</div>
   `;
 
-  renderTabsRow();
-  if(state.tabs.length === 0){
-    renderNoMonthsState();
-  } else if(isSettings || !activeTabObj){
+  if(isSettings){
+    document.getElementById('tabs-row').classList.add('hidden');
     renderFixedExpensesTab();
   } else {
-    renderMonthTab(activeTabObj);
+    renderTabsRow();
+    if(state.tabs.length === 0){
+      renderNoMonthsState();
+    } else {
+      renderMonthTab(activeTabObj);
+    }
   }
 }
 
@@ -934,7 +938,7 @@ function renderMonthTab(tabObj){
   };
   document.getElementById('search-box').oninput = (e)=>{ uiFilters.search = e.target.value; renderTxRows(tabObj.key); };
   document.getElementById('btn-gastos-add-toggle').onclick = (e)=>{ e.stopPropagation(); document.getElementById('gastos-add-panel').classList.toggle('hidden'); };
-  document.getElementById('btn-edit-fixed').onclick = ()=>{ state.activeTab = '__fixed__'; saveState(); render(); };
+  document.getElementById('btn-edit-fixed').onclick = ()=>{ fixedReturnTab = state.activeTab; state.activeTab = '__fixed__'; saveState(); render(); };
   document.getElementById('btn-upload-pdf-toolbar').onclick = ()=>{ document.getElementById('gastos-add-panel').classList.add('hidden'); openImportModal(tabObj.key); };
   document.getElementById('btn-add-manual').onclick = ()=>{ document.getElementById('gastos-add-panel').classList.add('hidden'); openTxModal(null, tabObj.key); };
   document.getElementById('btn-add-fixed-month').onclick = ()=>{ document.getElementById('gastos-add-panel').classList.add('hidden'); applyFixedTemplatesToMonth(tabObj.key); };
@@ -1351,6 +1355,7 @@ function applyFixedTemplatesToMonth(monthKey){
 function renderFixedExpensesTab(){
   const container = document.getElementById('tab-content');
   container.innerHTML = `
+    <button class="btn-fab-label" id="btn-back-to-months" style="margin-bottom:16px;">${mi('arrow_back',{size:16})} Regresar a mis estados de cuenta</button>
     <div class="card" style="margin-bottom:16px;">
       <p style="margin:0;color:var(--text-secondary);">
         Define aquí tus gastos fijos recurrentes (renta, seguros, suscripciones…). Actívalos para que aparezcan como
@@ -1360,10 +1365,6 @@ function renderFixedExpensesTab(){
       </p>
     </div>
     <div class="card">
-      <div class="fixed-toolbar">
-        <span class="hint fixed-dirty-note hidden" id="fixed-dirty-note" style="margin:0;">${mi('info',{size:14})} Tienes cambios sin guardar</span>
-        <button class="btn btn-primary" id="btn-save-fixed" disabled>${mi('save',{size:16})} Guardar cambios</button>
-      </div>
       <div style="overflow-x:auto;">
         <table class="fixed-table" style="min-width:760px;">
           <thead><tr>
@@ -1373,7 +1374,11 @@ function renderFixedExpensesTab(){
         </table>
       </div>
       <div style="margin-top:12px;">
-        <button class="btn btn-sm" id="btn-add-fixed-template">${mi('add',{size:15})} Agregar gasto fijo</button>
+        <button class="btn btn-sm" id="btn-add-fixed-template" style="width:100%;">${mi('add',{size:15})} Agregar gasto fijo</button>
+      </div>
+      <div class="fixed-toolbar" style="margin-top:14px;margin-bottom:0;">
+        <span class="hint fixed-dirty-note hidden" id="fixed-dirty-note" style="margin:0;">${mi('info',{size:14})} Tienes cambios sin guardar</span>
+        <button class="btn btn-primary" id="btn-save-fixed" disabled>${mi('save',{size:16})} Guardar cambios</button>
       </div>
     </div>
   `;
@@ -1381,6 +1386,12 @@ function renderFixedExpensesTab(){
   fixedFormDirty = false;
   renderFixedRows();
   updateFixedSaveUI();
+  document.getElementById('btn-back-to-months').onclick = ()=>guardLeaveFixedTab(()=>{
+    const target = (fixedReturnTab && state.tabs.some(t=>t.key===fixedReturnTab)) ? fixedReturnTab : (state.tabs.length ? state.tabs[state.tabs.length-1].key : null);
+    state.activeTab = target;
+    saveState();
+    render();
+  });
   document.getElementById('btn-add-fixed-template').onclick = ()=>{
     fixedDraft.push({id:uid('f'), description:'Nuevo gasto fijo', category:'Otros', tipo:'Fijo', amount:0, appliesTo:'all', active:true});
     markFixedDirty();
